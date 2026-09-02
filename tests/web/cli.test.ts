@@ -228,3 +228,79 @@ export class PiWebRuntime {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 });
+
+test("installed CLI aliases the Pi peer package to the handed-over entry", async () => {
+  const temporaryRoot = await mkdtemp(join(process.cwd(), ".openpi-cli-test-"));
+  const packageRoot = join(temporaryRoot, "node_modules", "@tt-a1i", "openpi");
+  try {
+    await mkdir(join(packageRoot, "bin"), { recursive: true });
+    await mkdir(join(packageRoot, "web", "host"), { recursive: true });
+    await mkdir(join(packageRoot, "web", "runtime"), { recursive: true });
+    await cp(entrypointPath, join(packageRoot, "bin", "openpi.js"));
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ type: "module" }),
+    );
+    const stubEntry = join(packageRoot, "pi-entry-stub.js");
+    await writeFile(stubEntry, 'export const PI_ENTRY_STUB = "handed-over";\n');
+    await writeFile(
+      join(packageRoot, "web", "host", "browser-launcher.ts"),
+      "export async function openBrowser(): Promise<boolean> { return false; }\n",
+    );
+    await writeFile(
+      join(packageRoot, "web", "host", "terminal-status.ts"),
+      "export function formatWebReadyScreen(options: { origin: string; url: string }): string { return `ready ${options.origin} ${options.url}`; }\n",
+    );
+    await writeFile(
+      join(packageRoot, "web", "host", "web-host.ts"),
+      `export class WebHost {
+  origin = "http://127.0.0.1:12346";
+  url = "http://127.0.0.1:12346/";
+  async start(): Promise<void> {}
+  async stop(): Promise<void> {}
+}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "web", "trace.ts"),
+      "export function traceWeb(): void {}\n",
+    );
+    await writeFile(
+      join(packageRoot, "web", "runtime", "pi-runtime.ts"),
+      `import { writeFile } from "node:fs/promises";
+import { PI_ENTRY_STUB } from "@earendil-works/pi-coding-agent";
+
+export class PiWebRuntime {
+  static async createWithoutWorkspace(): Promise<{ cwd: string; dispose(): Promise<void> }> {
+    const marker = process.env.OPENPI_CLI_PI_ENTRY_MARKER;
+    if (marker) await writeFile(marker, PI_ENTRY_STUB);
+    return {
+      cwd: "/web-owned-bootstrap",
+      async dispose(): Promise<void> {},
+    };
+  }
+}\n`,
+    );
+
+    const entryMarker = join(temporaryRoot, "pi-entry");
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        join(packageRoot, "bin", "openpi.js"),
+        "web",
+        "--no-workspace",
+        "--no-open",
+      ],
+      {
+        env: {
+          ...process.env,
+          OPENPI_PI_CODING_AGENT_ENTRY: stubEntry,
+          OPENPI_CLI_PI_ENTRY_MARKER: entryMarker,
+        },
+      },
+    );
+    assert.match(stdout, /ready http:\/\/127\.0\.0\.1:12346/u);
+    assert.equal(await readFile(entryMarker, "utf8"), "handed-over");
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});

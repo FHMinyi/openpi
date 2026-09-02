@@ -43,7 +43,12 @@ class FakeWebProcess extends EventEmitter implements WebProcess {
 }
 
 function harness(
-  options: { mode?: "tui" | "print"; idle?: boolean; stopError?: Error } = {},
+  options: {
+    mode?: "tui" | "print";
+    idle?: boolean;
+    stopError?: Error;
+    piCodingAgentEntry?: string;
+  } = {},
 ) {
   const hooks = new Map<string, Array<(event: unknown) => unknown>>();
   let command: CommandHandler | undefined;
@@ -56,6 +61,7 @@ function harness(
   let clearCalls = 0;
   const notifications: Array<{ message: string; level?: string }> = [];
   const children: FakeWebProcess[] = [];
+  const spawnEnvs: NodeJS.ProcessEnv[] = [];
   const cwd = "/workspace/current";
   const pi = {
     registerCommand(name: string, definition: { handler: CommandHandler }) {
@@ -71,6 +77,7 @@ function harness(
     entrypoint: "/package/bin/openpi.js",
     spawn(commandName, args, spawnOptions) {
       spawnCalls++;
+      spawnEnvs.push(spawnOptions.env);
       assert.equal(commandName, process.execPath);
       assert.deepEqual(args, [
         "/package/bin/openpi.js",
@@ -84,6 +91,10 @@ function harness(
       assert.equal(spawnOptions.env.PI_SESSION_ID, undefined);
       assert.equal(spawnOptions.env.PI_SESSION_FILE, undefined);
       assert.equal(spawnOptions.env.PATH, process.env.PATH);
+      assert.equal(
+        spawnOptions.env.OPENPI_PI_CODING_AGENT_ENTRY,
+        options.piCodingAgentEntry,
+      );
       assert.equal(spawnOptions.shell, false);
       assert.equal(spawnOptions.stdio, "inherit");
       const child = new FakeWebProcess();
@@ -99,6 +110,7 @@ function harness(
         activeSigint--;
       };
     },
+    resolvePiCodingAgentEntry: () => options.piCodingAgentEntry,
     shutdownTimeoutMs: 20,
   };
 
@@ -152,6 +164,7 @@ function harness(
     emit,
     children,
     notifications,
+    spawnEnv: () => spawnEnvs.at(-1),
     customCalls: () => customCalls,
     stopped: () => stopped,
     started: () => started,
@@ -193,6 +206,38 @@ test("/web hands the terminal to the exact packaged Web CLI and restores Pi", as
     else process.env.PI_SESSION_ID = previousSessionId;
     if (previousSessionFile === undefined) delete process.env.PI_SESSION_FILE;
     else process.env.PI_SESSION_FILE = previousSessionFile;
+  }
+});
+
+test("/web hands the child the resolved Pi entry and drops a stale one", async () => {
+  const previousEntry = process.env.OPENPI_PI_CODING_AGENT_ENTRY;
+  process.env.OPENPI_PI_CODING_AGENT_ENTRY =
+    "/stale/pi-coding-agent/dist/index.js";
+  const resolvedEntry =
+    "/pi/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
+  try {
+    const resolved = harness({ piCodingAgentEntry: resolvedEntry });
+    const running = resolved.run();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      resolved.spawnEnv()?.OPENPI_PI_CODING_AGENT_ENTRY,
+      resolvedEntry,
+    );
+    resolved.children[0]!.close(0);
+    await running;
+
+    const unresolved = harness();
+    const failed = unresolved.run();
+    await new Promise((resolve) => setImmediate(resolve));
+    const childEnv = unresolved.spawnEnv();
+    assert.ok(childEnv);
+    assert.equal("OPENPI_PI_CODING_AGENT_ENTRY" in childEnv, false);
+    unresolved.children[0]!.close(1);
+    await failed;
+  } finally {
+    if (previousEntry === undefined)
+      delete process.env.OPENPI_PI_CODING_AGENT_ENTRY;
+    else process.env.OPENPI_PI_CODING_AGENT_ENTRY = previousEntry;
   }
 });
 

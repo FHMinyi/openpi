@@ -67,7 +67,13 @@ const stop = () => {
 };
 
 try {
-  const jiti = createJiti(import.meta.url);
+  const piCodingAgentEntry = process.env.OPENPI_PI_CODING_AGENT_ENTRY;
+  const jiti = createJiti(
+    import.meta.url,
+    piCodingAgentEntry
+      ? { alias: { "@earendil-works/pi-coding-agent": piCodingAgentEntry } }
+      : {},
+  );
   const [browserModule, hostModule, runtimeModule, statusModule, traceModule] =
     await Promise.all([
       jiti.import("../web/host/browser-launcher.ts"),
