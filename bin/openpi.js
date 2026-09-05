@@ -67,12 +67,16 @@ const stop = () => {
 };
 
 try {
-  const piCodingAgentEntry = process.env.OPENPI_PI_CODING_AGENT_ENTRY;
+  const bootstrap = createJiti(import.meta.url);
+  const { resolveStandaloneJitiAliases } = await bootstrap.import(
+    "../web/host/pi-coding-agent-entry.ts",
+  );
+  const aliases = resolveStandaloneJitiAliases({
+    fromUrl: import.meta.url,
+  });
   const jiti = createJiti(
     import.meta.url,
-    piCodingAgentEntry
-      ? { alias: { "@earendil-works/pi-coding-agent": piCodingAgentEntry } }
-      : {},
+    Object.keys(aliases).length > 0 ? { alias: aliases } : {},
   );
   const [browserModule, hostModule, runtimeModule, statusModule, traceModule] =
     await Promise.all([

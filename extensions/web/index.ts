@@ -1,16 +1,16 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  PI_CODING_AGENT_ENTRY_ENV,
+  resolvePiCodingAgentEntry,
+} from "../../web/host/pi-coding-agent-entry.ts";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
-const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
-const PI_CODING_AGENT_ENTRY_ENV = "OPENPI_PI_CODING_AGENT_ENTRY";
-const PACKAGE_ROOT_SEARCH_DEPTH = 10;
 
 export interface WebProcess {
   readonly exitCode: number | null;
@@ -28,42 +28,6 @@ interface SpawnWebOptions {
   env: NodeJS.ProcessEnv;
   shell: false;
   stdio: "inherit";
-}
-
-function findPackageRoot(realPath: string, packageName: string) {
-  let dir = dirname(realPath);
-  for (let depth = 0; depth < PACKAGE_ROOT_SEARCH_DEPTH; depth++) {
-    const manifestPath = join(dir, "package.json");
-    if (existsSync(manifestPath)) {
-      const manifest: { name?: unknown } = JSON.parse(
-        readFileSync(manifestPath, "utf8"),
-      );
-      if (manifest.name === packageName) return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return undefined;
-}
-
-// Pi loads this extension through jiti aliases, so neither `import.meta.resolve`
-// nor `createRequire` can locate the peer package here; the launcher path is the
-// only handle that reaches the running Pi installation.
-function resolvePiCodingAgentEntryFromLauncher() {
-  const launcher = process.argv[1];
-  if (!launcher) return undefined;
-  try {
-    const packageRoot = findPackageRoot(
-      realpathSync(launcher),
-      PI_CODING_AGENT_PACKAGE,
-    );
-    if (!packageRoot) return undefined;
-    const entry = join(packageRoot, "dist", "index.js");
-    return existsSync(entry) ? entry : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function webProcessEnvironment(
@@ -114,7 +78,7 @@ const defaultDependencies: WebCommandDependencies = {
     process.on("SIGINT", keepPiAlive);
     return () => process.removeListener("SIGINT", keepPiAlive);
   },
-  resolvePiCodingAgentEntry: resolvePiCodingAgentEntryFromLauncher,
+  resolvePiCodingAgentEntry,
   shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
 };
 
