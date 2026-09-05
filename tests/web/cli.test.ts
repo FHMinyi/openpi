@@ -18,6 +18,8 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 
+// Existence only. Callers that need payload must publish via same-dir
+// write-then-rename, or read after the writer process has exited.
 function waitForPath(
   path: string,
   timeoutMs: number,
@@ -318,7 +320,7 @@ test("a second SIGTERM uses default termination while stop is in flight", async 
     );
     await writeFile(
       join(packageRoot, "web", "host", "web-host.ts"),
-      `import { writeFile } from "node:fs/promises";
+      `import { rename, writeFile } from "node:fs/promises";
 
 export class WebHost {
   origin = "http://127.0.0.1:12348";
@@ -329,7 +331,11 @@ export class WebHost {
   }
   async stop(): Promise<void> {
     const marker = process.env.OPENPI_CLI_STOP_ENTERED_MARKER;
-    if (marker) await writeFile(marker, "entered");
+    if (marker) {
+      const staging = \`\${marker}.tmp\`;
+      await writeFile(staging, "entered");
+      await rename(staging, marker);
+    }
     this.hang ??= setInterval(() => undefined, 60_000);
     await new Promise(() => {});
   }
