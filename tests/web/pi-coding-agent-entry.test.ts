@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import {
   missingPiCodingAgentDiagnostic,
@@ -30,6 +30,10 @@ const HOST_0_85_EXPORTS = {
   ...OFFICIAL_0_84_1_EXPORTS,
   "./unix": { import: "./dist/unix.js" },
 } as const;
+
+function officialPackageEntryTail(path: string) {
+  return path.split(/[\\/]/u).slice(-4).join("/");
+}
 
 async function writePiPackage(
   root: string,
@@ -299,7 +303,25 @@ test("real checkout 0.84.1 exports resolve from this install", () => {
   });
   const entry = aliases[PI_CODING_AGENT_PACKAGE];
   assert.ok(entry);
-  assert.match(entry, /@earendil-works\/pi-coding-agent\/dist\/index\.js$/u);
+  const officialEntry = realpathSync(
+    fileURLToPath(
+      new URL(
+        "../../node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+        import.meta.url,
+      ),
+    ),
+  );
+  assert.equal(entry, officialEntry);
+  assert.equal(
+    officialPackageEntryTail(entry),
+    "@earendil-works/pi-coding-agent/dist/index.js",
+  );
+  assert.equal(
+    officialPackageEntryTail(
+      "D:\\a\\openpi\\openpi\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\index.js",
+    ),
+    "@earendil-works/pi-coding-agent/dist/index.js",
+  );
   const manifest = JSON.parse(
     readFileSync(
       new URL(
