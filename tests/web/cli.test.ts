@@ -18,12 +18,29 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 
-// Existence only. Callers that need payload must publish via same-dir
-// write-then-rename, or read after the writer process has exited.
-function waitForPath(
+async function inspectPath(path: string) {
+  try {
+    return { exists: true, content: await readFile(path, "utf8") };
+  } catch (error) {
+    return {
+      exists: false,
+      error:
+        error instanceof Error && "code" in error
+          ? String(error.code)
+          : String(error),
+    };
+  }
+}
+
+// Same-dir write-then-rename makes the final name appear only after
+// contents are complete. Directory watch can fire first for the staging
+// name and miss the rename; also wake from the writer's stderr.
+function waitForPublishedMarker(
   path: string,
+  expected: string,
   timeoutMs: number,
   diagnostics: () => string,
+  wake?: NodeJS.ReadableStream,
 ) {
   return new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -32,22 +49,35 @@ function waitForPath(
       settled = true;
       clearTimeout(timer);
       watcher.close();
+      wake?.off("data", tryRead);
       if (error) reject(error);
       else resolve();
     };
-    const timer = setTimeout(() => {
-      finish(new Error(`timed out waiting for ${path}; ${diagnostics()}`));
-    }, timeoutMs);
-    const watcher = watch(dirname(path), () => {
-      void stat(path).then(
-        () => finish(),
+    const tryRead = () => {
+      void readFile(path, "utf8").then(
+        (content) => {
+          if (content === expected) finish();
+        },
         () => {},
       );
+    };
+    const timer = setTimeout(() => {
+      void Promise.all([inspectPath(path), inspectPath(`${path}.tmp`)]).then(
+        ([marker, staging]) => {
+          finish(
+            new Error(
+              `timed out waiting for ${path} contents; marker=${JSON.stringify(marker)} staging=${JSON.stringify(staging)}; ${diagnostics()}`,
+            ),
+          );
+        },
+      );
+    }, timeoutMs);
+    const watcher = watch(dirname(path), tryRead);
+    watcher.on("error", (error) => {
+      finish(new Error(`watch error for ${path}: ${error}; ${diagnostics()}`));
     });
-    void stat(path).then(
-      () => finish(),
-      () => {},
-    );
+    wake?.on("data", tryRead);
+    tryRead();
   });
 }
 
@@ -335,6 +365,7 @@ export class WebHost {
       const staging = \`\${marker}.tmp\`;
       await writeFile(staging, "entered");
       await rename(staging, marker);
+      process.stderr.write("stop-entered\\n");
     }
     this.hang ??= setInterval(() => undefined, 60_000);
     await new Promise(() => {});
@@ -382,8 +413,9 @@ export class WebHost {
     stderr.on("data", (chunk) => {
       errorOutput += chunk;
     });
+    let firstKill: boolean | undefined;
     const diagnostics = () =>
-      `code=${String(child?.exitCode)} signal=${String(child?.signalCode)} stdout=${output} stderr=${errorOutput}`;
+      `firstKill=${String(firstKill)} code=${String(child?.exitCode)} signal=${String(child?.signalCode)} stdout=${output} stderr=${errorOutput}`;
     const closed = once(child, "close") as Promise<
       [number | null, NodeJS.Signals | null]
     >;
@@ -404,12 +436,23 @@ export class WebHost {
         sentFirst = true;
         stdout.off("data", onStdout);
         clearTimeout(timeout);
-        child?.kill("SIGTERM");
+        firstKill = child?.kill("SIGTERM");
         resolve();
       };
       stdout.on("data", onStdout);
     });
-    await waitForPath(stopMarker, 5_000, diagnostics);
+    assert.equal(
+      firstKill,
+      true,
+      `first SIGTERM not delivered; ${diagnostics()}`,
+    );
+    await waitForPublishedMarker(
+      stopMarker,
+      "entered",
+      5_000,
+      diagnostics,
+      stderr,
+    );
     assert.equal(await readFile(stopMarker, "utf8"), "entered");
     child.kill("SIGTERM");
     const [exitCode, signal] = await Promise.race([
