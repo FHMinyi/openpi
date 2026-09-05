@@ -121,8 +121,10 @@ export function validatePiCodingAgentEntry(candidate: string | undefined) {
 export function missingPiCodingAgentDiagnostic() {
   return [
     `OpenPI Web could not resolve ${PI_CODING_AGENT_PACKAGE} for this process.`,
+    "Host resolution uses only the current process argv identity and fail-closes if that path is not the official package.",
+    `${PI_CODING_AGENT_ENTRY_ENV} is an explicit standalone handoff, not a host fallback.`,
+    `Standalone openpi web uses that handoff when valid, then the installed nested or hoisted peer (npm install ${PI_CODING_AGENT_PACKAGE}).`,
     "From a running Pi session use /web, which hands over the host Pi.",
-    `Standalone openpi web needs that peer installed next to this package (npm install ${PI_CODING_AGENT_PACKAGE}).`,
     "Supported package install is `pi install npm:@tt-a1i/openpi`.",
   ].join(" ");
 }
@@ -133,12 +135,11 @@ export function resolvePiCodingAgentEntry(options?: {
   argv1?: string | undefined;
   fromUrl?: string;
 }) {
-  const env = options?.env ?? process.env;
-  const handed = validatePiCodingAgentEntry(env[PI_CODING_AGENT_ENTRY_ENV]);
-  if (handed) return handed;
-
   const source = options?.source ?? "host";
   if (source === "standalone") {
+    const env = options?.env ?? process.env;
+    const handed = validatePiCodingAgentEntry(env[PI_CODING_AGENT_ENTRY_ENV]);
+    if (handed) return handed;
     return resolveFromInstall(options?.fromUrl ?? import.meta.url);
   }
 

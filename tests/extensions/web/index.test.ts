@@ -57,6 +57,7 @@ function harness(
   let started = 0;
   let rendered = 0;
   let spawnCalls = 0;
+  let resolveCalls = 0;
   let activeSigint = 0;
   let clearCalls = 0;
   const notifications: Array<{ message: string; level?: string }> = [];
@@ -116,10 +117,12 @@ function harness(
         activeSigint--;
       };
     },
-    resolvePiCodingAgentEntry: () =>
-      options.piCodingAgentEntry === null
+    resolvePiCodingAgentEntry: () => {
+      resolveCalls++;
+      return options.piCodingAgentEntry === null
         ? undefined
-        : (options.piCodingAgentEntry ?? "/host/pi-coding-agent/dist/index.js"),
+        : (options.piCodingAgentEntry ?? "/host/pi-coding-agent/dist/index.js");
+    },
     shutdownTimeoutMs: 20,
   };
 
@@ -179,6 +182,7 @@ function harness(
     started: () => started,
     rendered: () => rendered,
     spawnCalls: () => spawnCalls,
+    resolveCalls: () => resolveCalls,
     activeSigint: () => activeSigint,
     clearCalls: () => clearCalls,
   };
@@ -195,6 +199,7 @@ test("/web hands the terminal to the exact packaged Web CLI and restores Pi", as
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(h.spawnCalls(), 1);
+    assert.equal(h.resolveCalls(), 1);
     assert.equal(h.stopped(), 1);
     assert.equal(h.clearCalls(), 1);
     assert.equal(h.activeSigint(), 1);
@@ -227,6 +232,7 @@ test("/web hands the host Pi entry to the child and fail-closes without one", as
     const resolved = harness({ piCodingAgentEntry: resolvedEntry });
     const running = resolved.run();
     await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(resolved.resolveCalls(), 1);
     assert.equal(
       resolved.spawnEnv()?.OPENPI_PI_CODING_AGENT_ENTRY,
       resolvedEntry,
@@ -237,6 +243,7 @@ test("/web hands the host Pi entry to the child and fail-closes without one", as
     const unresolved = harness({ piCodingAgentEntry: null });
     await unresolved.run();
     assert.equal(unresolved.spawnCalls(), 0);
+    assert.equal(unresolved.resolveCalls(), 1);
     assert.match(
       unresolved.notifications.at(-1)?.message ?? "",
       /could not resolve @earendil-works\/pi-coding-agent/u,

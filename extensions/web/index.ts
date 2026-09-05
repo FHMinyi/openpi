@@ -111,6 +111,7 @@ function runWebInForeground(
   dependencies: WebCommandDependencies,
   setActive: (active: ActiveWebProcess | undefined) => void,
   isShuttingDown: () => boolean,
+  piCodingAgentEntry: string,
 ) {
   return ctx.ui.custom<WebExit>((tui, _theme, _keybindings, done) => {
     let finished = false;
@@ -144,10 +145,7 @@ function runWebInForeground(
         [dependencies.entrypoint, "web", "--no-workspace"],
         {
           cwd: childCwd,
-          env: webProcessEnvironment(
-            childCwd,
-            dependencies.resolvePiCodingAgentEntry(),
-          ),
+          env: webProcessEnvironment(childCwd, piCodingAgentEntry),
           shell: false,
           stdio: "inherit",
         },
@@ -210,7 +208,8 @@ export default function web(
         ctx.ui.notify("OpenPI Web Workbench is already running.", "warning");
         return;
       }
-      if (!dependencies.resolvePiCodingAgentEntry()) {
+      const piCodingAgentEntry = dependencies.resolvePiCodingAgentEntry();
+      if (!piCodingAgentEntry) {
         ctx.ui.notify(missingPiCodingAgentDiagnostic(), "error");
         return;
       }
@@ -224,6 +223,7 @@ export default function web(
             active = next;
           },
           () => shuttingDown,
+          piCodingAgentEntry,
         );
         if (shuttingDown) return;
         if (result.kind === "error") {

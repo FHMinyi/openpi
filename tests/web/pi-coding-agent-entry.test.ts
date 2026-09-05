@@ -111,12 +111,83 @@ test("validated handoff must be the official package entry, not any existing fil
     );
     assert.equal(
       resolvePiCodingAgentEntry({
+        source: "standalone",
+        env: { [PI_CODING_AGENT_ENTRY_ENV]: junk },
+        argv1: layout.host.cli,
+        fromUrl: layout.fromUrl,
+      }),
+      realpathSync(layout.peer.entry),
+    );
+  } finally {
+    await rm(layout.root, { recursive: true, force: true });
+  }
+});
+
+test("host uses argv Pi B even when env hands a valid Pi A", async () => {
+  const layout = await isolatedLayout();
+  try {
+    assert.equal(
+      resolvePiCodingAgentEntry({
         source: "host",
         env: { [PI_CODING_AGENT_ENTRY_ENV]: layout.host.cli },
         argv1: layout.peer.cli,
         fromUrl: layout.fromUrl,
       }),
+      realpathSync(layout.peer.entry),
+    );
+  } finally {
+    await rm(layout.root, { recursive: true, force: true });
+  }
+});
+
+test("standalone uses a validated explicit handoff before its own peer", async () => {
+  const layout = await isolatedLayout();
+  try {
+    assert.equal(
+      resolvePiCodingAgentEntry({
+        source: "standalone",
+        env: { [PI_CODING_AGENT_ENTRY_ENV]: layout.host.cli },
+        argv1: layout.peer.cli,
+        fromUrl: layout.fromUrl,
+      }),
       realpathSync(layout.host.entry),
+    );
+  } finally {
+    await rm(layout.root, { recursive: true, force: true });
+  }
+});
+
+test("invalid handoff is ignored: host fail-closes without argv, standalone uses own peer", async () => {
+  const layout = await isolatedLayout();
+  const junk = join(layout.root, "random.js");
+  try {
+    await writeFile(junk, "export {}\n");
+    assert.equal(
+      resolvePiCodingAgentEntry({
+        source: "host",
+        env: { [PI_CODING_AGENT_ENTRY_ENV]: junk },
+        argv1: "",
+        fromUrl: layout.fromUrl,
+      }),
+      undefined,
+    );
+    assert.equal(
+      resolvePiCodingAgentEntry({
+        source: "host",
+        env: { [PI_CODING_AGENT_ENTRY_ENV]: layout.host.cli },
+        argv1: junk,
+        fromUrl: layout.fromUrl,
+      }),
+      undefined,
+    );
+    assert.equal(
+      resolvePiCodingAgentEntry({
+        source: "standalone",
+        env: { [PI_CODING_AGENT_ENTRY_ENV]: junk },
+        argv1: layout.host.cli,
+        fromUrl: layout.fromUrl,
+      }),
+      realpathSync(layout.peer.entry),
     );
   } finally {
     await rm(layout.root, { recursive: true, force: true });
@@ -207,6 +278,14 @@ test("standalone fail-closes without a peer and does not walk PATH", async () =>
     assert.match(
       missingPiCodingAgentDiagnostic(),
       /pi install npm:@tt-a1i\/openpi/u,
+    );
+    assert.match(
+      missingPiCodingAgentDiagnostic(),
+      /current process argv identity/u,
+    );
+    assert.match(
+      missingPiCodingAgentDiagnostic(),
+      /explicit standalone handoff, not a host fallback/u,
     );
   } finally {
     await rm(layout.root, { recursive: true, force: true });
