@@ -33,6 +33,29 @@ async function copyStandaloneLoader(packageRoot: string) {
   );
 }
 
+async function writeOfficialPeer(root: string, marker = "peer") {
+  const peerRoot = join(
+    root,
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+  );
+  await mkdir(join(peerRoot, "dist"), { recursive: true });
+  await writeFile(
+    join(peerRoot, "package.json"),
+    JSON.stringify({
+      name: "@earendil-works/pi-coding-agent",
+      type: "module",
+      exports: { ".": { import: "./dist/index.js" } },
+    }),
+  );
+  await writeFile(
+    join(peerRoot, "dist", "index.js"),
+    `export const PI_ENTRY_STUB = ${JSON.stringify(marker)};\n`,
+  );
+  return peerRoot;
+}
+
 test("openpi is an executable standalone Web entrypoint", async () => {
   if (process.platform !== "win32") {
     const info = await stat(entrypoint);
@@ -55,6 +78,7 @@ test("installed CLI loads TypeScript Web modules through its package loader", as
     await mkdir(join(packageRoot, "web", "host"), { recursive: true });
     await mkdir(join(packageRoot, "web", "runtime"), { recursive: true });
     await copyStandaloneLoader(packageRoot);
+    await writeOfficialPeer(temporaryRoot);
     await cp(
       staticAssetsPath,
       join(packageRoot, "web", "host", "static-assets.ts"),
@@ -256,7 +280,17 @@ test("installed CLI aliases the Pi peer package to the handed-over entry", async
       join(packageRoot, "package.json"),
       JSON.stringify({ type: "module" }),
     );
-    const stubEntry = join(packageRoot, "pi-entry-stub.js");
+    const handedRoot = join(temporaryRoot, "handed-pi");
+    await mkdir(join(handedRoot, "dist"), { recursive: true });
+    await writeFile(
+      join(handedRoot, "package.json"),
+      JSON.stringify({
+        name: "@earendil-works/pi-coding-agent",
+        type: "module",
+        exports: { ".": { import: "./dist/index.js" } },
+      }),
+    );
+    const stubEntry = join(handedRoot, "dist", "index.js");
     await writeFile(stubEntry, 'export const PI_ENTRY_STUB = "handed-over";\n');
     await writeFile(
       join(packageRoot, "web", "host", "browser-launcher.ts"),
@@ -320,48 +354,53 @@ export class PiWebRuntime {
   }
 });
 
-test("installed CLI resolves the Pi peer from PATH without a pre-seeded entry", async () => {
+test("installed CLI resolves its own official-export peer and fail-closes without one", async () => {
   const temporaryRoot = await mkdtemp(join(process.cwd(), ".openpi-cli-test-"));
   const packageRoot = join(temporaryRoot, "node_modules", "@tt-a1i", "openpi");
-  const shadowPeer = join(
+  const peerRoot = join(
     temporaryRoot,
     "node_modules",
     "@earendil-works",
     "pi-coding-agent",
   );
-  const piRoot = join(temporaryRoot, "fake-pi");
+  const otherPi = join(temporaryRoot, "other-pi");
   try {
     await mkdir(join(packageRoot, "bin"), { recursive: true });
     await mkdir(join(packageRoot, "web", "host"), { recursive: true });
     await mkdir(join(packageRoot, "web", "runtime"), { recursive: true });
-    await mkdir(shadowPeer, { recursive: true });
-    await mkdir(join(piRoot, "dist", "bundle"), { recursive: true });
-    await mkdir(join(piRoot, "bin"), { recursive: true });
+    await mkdir(join(peerRoot, "dist"), { recursive: true });
+    await mkdir(join(otherPi, "dist"), { recursive: true });
+    await mkdir(join(otherPi, "bin"), { recursive: true });
     await copyStandaloneLoader(packageRoot);
-    await writeFile(
-      join(shadowPeer, "package.json"),
-      JSON.stringify({
-        name: "@earendil-works/pi-coding-agent",
-        type: "module",
-      }),
-    );
     await writeFile(
       join(packageRoot, "package.json"),
       JSON.stringify({ type: "module" }),
     );
     await writeFile(
-      join(piRoot, "package.json"),
+      join(peerRoot, "package.json"),
       JSON.stringify({
         name: "@earendil-works/pi-coding-agent",
         type: "module",
+        exports: { ".": { import: "./dist/index.js" } },
       }),
     );
     await writeFile(
-      join(piRoot, "dist", "index.js"),
-      'export const PI_ENTRY_STUB = "path-resolved";\n',
+      join(peerRoot, "dist", "index.js"),
+      'export const PI_ENTRY_STUB = "install-peer";\n',
     );
-    await writeFile(join(piRoot, "dist", "bundle", "cli.js"), "");
-    await writeFile(join(piRoot, "bin", "pi"), "#!/usr/bin/env node\n");
+    await writeFile(
+      join(otherPi, "package.json"),
+      JSON.stringify({
+        name: "@earendil-works/pi-coding-agent",
+        type: "module",
+        exports: { ".": { import: "./dist/index.js" } },
+      }),
+    );
+    await writeFile(
+      join(otherPi, "dist", "index.js"),
+      'export const PI_ENTRY_STUB = "path-pi";\n',
+    );
+    await writeFile(join(otherPi, "bin", "pi"), "#!/usr/bin/env node\n");
     await writeFile(
       join(packageRoot, "web", "host", "browser-launcher.ts"),
       "export async function openBrowser(): Promise<boolean> { return false; }\n",
@@ -414,13 +453,49 @@ export class PiWebRuntime {
       {
         env: {
           ...childEnv,
-          PATH: join(piRoot, "bin"),
+          PATH: join(otherPi, "bin"),
           OPENPI_CLI_PI_ENTRY_MARKER: entryMarker,
         },
       },
     );
     assert.match(stdout, /ready http:\/\/127\.0\.0\.1:12347/u);
-    assert.equal(await readFile(entryMarker, "utf8"), "path-resolved");
+    assert.equal(await readFile(entryMarker, "utf8"), "install-peer");
+
+    const isolatedRoot = await mkdtemp(
+      join(process.cwd(), ".openpi-cli-isolated-"),
+    );
+    await mkdir(join(isolatedRoot, "bin"), { recursive: true });
+    await mkdir(join(isolatedRoot, "web", "host"), { recursive: true });
+    await copyStandaloneLoader(isolatedRoot);
+    await writeFile(
+      join(isolatedRoot, "package.json"),
+      JSON.stringify({ type: "module" }),
+    );
+    try {
+      await execFileAsync(
+        process.execPath,
+        [
+          join(isolatedRoot, "bin", "openpi.js"),
+          "web",
+          "--no-workspace",
+          "--no-open",
+        ],
+        {
+          env: {
+            ...childEnv,
+            PATH: join(otherPi, "bin"),
+          },
+        },
+      );
+      assert.fail("missing peer must fail closed");
+    } catch (error) {
+      assert.match(
+        String((error as { stderr?: string }).stderr),
+        /could not resolve @earendil-works\/pi-coding-agent/u,
+      );
+    } finally {
+      await rm(isolatedRoot, { recursive: true, force: true });
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

@@ -6,6 +6,7 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+  missingPiCodingAgentDiagnostic,
   PI_CODING_AGENT_ENTRY_ENV,
   resolvePiCodingAgentEntry,
 } from "../../web/host/pi-coding-agent-entry.ts";
@@ -78,7 +79,8 @@ const defaultDependencies: WebCommandDependencies = {
     process.on("SIGINT", keepPiAlive);
     return () => process.removeListener("SIGINT", keepPiAlive);
   },
-  resolvePiCodingAgentEntry,
+  resolvePiCodingAgentEntry: () =>
+    resolvePiCodingAgentEntry({ source: "host" }),
   shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
 };
 
@@ -206,6 +208,10 @@ export default function web(
       }
       if (running) {
         ctx.ui.notify("OpenPI Web Workbench is already running.", "warning");
+        return;
+      }
+      if (!dependencies.resolvePiCodingAgentEntry()) {
+        ctx.ui.notify(missingPiCodingAgentDiagnostic(), "error");
         return;
       }
 

@@ -47,7 +47,7 @@ function harness(
     mode?: "tui" | "print";
     idle?: boolean;
     stopError?: Error;
-    piCodingAgentEntry?: string;
+    piCodingAgentEntry?: string | null;
   } = {},
 ) {
   const hooks = new Map<string, Array<(event: unknown) => unknown>>();
@@ -96,7 +96,10 @@ function harness(
       assert.equal(childPath, process.env.PATH);
       assert.equal(
         spawnOptions.env.OPENPI_PI_CODING_AGENT_ENTRY,
-        options.piCodingAgentEntry,
+        options.piCodingAgentEntry === null
+          ? undefined
+          : (options.piCodingAgentEntry ??
+              "/host/pi-coding-agent/dist/index.js"),
       );
       assert.equal(spawnOptions.shell, false);
       assert.equal(spawnOptions.stdio, "inherit");
@@ -113,7 +116,10 @@ function harness(
         activeSigint--;
       };
     },
-    resolvePiCodingAgentEntry: () => options.piCodingAgentEntry,
+    resolvePiCodingAgentEntry: () =>
+      options.piCodingAgentEntry === null
+        ? undefined
+        : (options.piCodingAgentEntry ?? "/host/pi-coding-agent/dist/index.js"),
     shutdownTimeoutMs: 20,
   };
 
@@ -212,10 +218,9 @@ test("/web hands the terminal to the exact packaged Web CLI and restores Pi", as
   }
 });
 
-test("/web hands the child the resolved Pi entry and drops a stale one", async () => {
+test("/web hands the host Pi entry to the child and fail-closes without one", async () => {
   const previousEntry = process.env.OPENPI_PI_CODING_AGENT_ENTRY;
-  process.env.OPENPI_PI_CODING_AGENT_ENTRY =
-    "/stale/pi-coding-agent/dist/index.js";
+  process.env.OPENPI_PI_CODING_AGENT_ENTRY = "/stale/not-a-pi-package.js";
   const resolvedEntry =
     "/pi/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
   try {
@@ -229,14 +234,14 @@ test("/web hands the child the resolved Pi entry and drops a stale one", async (
     resolved.children[0]!.close(0);
     await running;
 
-    const unresolved = harness();
-    const failed = unresolved.run();
-    await new Promise((resolve) => setImmediate(resolve));
-    const childEnv = unresolved.spawnEnv();
-    assert.ok(childEnv);
-    assert.equal("OPENPI_PI_CODING_AGENT_ENTRY" in childEnv, false);
-    unresolved.children[0]!.close(1);
-    await failed;
+    const unresolved = harness({ piCodingAgentEntry: null });
+    await unresolved.run();
+    assert.equal(unresolved.spawnCalls(), 0);
+    assert.match(
+      unresolved.notifications.at(-1)?.message ?? "",
+      /could not resolve @earendil-works\/pi-coding-agent/u,
+    );
+    assert.equal(unresolved.notifications.at(-1)?.level, "error");
   } finally {
     if (previousEntry === undefined)
       delete process.env.OPENPI_PI_CODING_AGENT_ENTRY;

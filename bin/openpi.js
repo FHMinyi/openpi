@@ -68,16 +68,16 @@ const stop = () => {
 
 try {
   const bootstrap = createJiti(import.meta.url);
-  const { resolveStandaloneJitiAliases } = await bootstrap.import(
-    "../web/host/pi-coding-agent-entry.ts",
-  );
+  const { missingPiCodingAgentDiagnostic, resolveStandaloneJitiAliases } =
+    await bootstrap.import("../web/host/pi-coding-agent-entry.ts");
   const aliases = resolveStandaloneJitiAliases({
     fromUrl: import.meta.url,
   });
-  const jiti = createJiti(
-    import.meta.url,
-    Object.keys(aliases).length > 0 ? { alias: aliases } : {},
-  );
+  if (!aliases["@earendil-works/pi-coding-agent"]) {
+    console.error(missingPiCodingAgentDiagnostic());
+    process.exit(1);
+  }
+  const jiti = createJiti(import.meta.url, { alias: aliases });
   const [browserModule, hostModule, runtimeModule, statusModule, traceModule] =
     await Promise.all([
       jiti.import("../web/host/browser-launcher.ts"),
